@@ -2,7 +2,7 @@
 
 A single-file CLI that finds the cheapest coding model, and the lowest reasoning effort, that can do a given kind of job. It runs models on tasks with known answers, starting with the cheapest and climbing when a model fails. When one passes, the next model up runs once as a cross-check.
 
-I run several coding agents (Codex, Claude Code, Cursor, OpenCode) on fixed subscriptions and kept guessing which model was good enough for reading code, building a slice, or reviewing a diff. I built this to measure it on tasks from my own work.
+I run several coding agents (Codex, Claude Code, Cursor, OpenCode) on fixed subscriptions and kept guessing which model was good enough for reading code, building a slice, or reviewing a diff. I built this to measure it on tasks from my own work. AI coding agents wrote the code under my direction.
 
 ## How a task works
 
