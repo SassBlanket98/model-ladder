@@ -1,0 +1,6 @@
+{
+  "job": "build",
+  "mode": "write",
+  "timeoutSec": 600,
+  "check": "python3 -m unittest -q test_hidden"
+}

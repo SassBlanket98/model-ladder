@@ -1,0 +1,12 @@
+{
+  "subscriptions": {
+    "codex": {"windows": ["5h", "7d"]},
+    "claude": {"windows": ["5h", "7d"]},
+    "opencode-go": {}
+  },
+  "models": [
+    {"id": "luna", "cli": "codex", "cliModel": "your-small-codex-model", "subscription": "codex", "efforts": ["low", "medium", "high"]},
+    {"id": "deepseek", "cli": "opencode", "cliModel": "provider/your-small-model", "subscription": "opencode-go", "efforts": ["default"]},
+    {"id": "opus", "cli": "claude", "cliModel": "your-frontier-claude-model", "subscription": "claude", "efforts": ["low", "medium", "high"], "neverJobs": ["read", "triage"]}
+  ]
+}

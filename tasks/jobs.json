@@ -1,0 +1,10 @@
+{
+  "build": {
+    "passPct": 80,
+    "maxFalseAlarms": null
+  },
+  "review": {
+    "passPct": 78,
+    "maxFalseAlarms": 1
+  }
+}
