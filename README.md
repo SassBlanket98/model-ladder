@@ -10,7 +10,7 @@ Each task is a folder:
 
 ```
 tasks/<taskId>/
-  task.json    job type, read or write mode, timeout, optional check command
+  task.json    job type, mode, timeout, optional check command and MCP servers
   prompt.md    what the model is asked; never mentions the key
   input/       copied to a fresh work dir for every run
   overlay/     hidden acceptance tests, copied in after the model finishes
@@ -26,7 +26,7 @@ A run goes like this:
 
 A model passes a job when it meets the job's percentage of key items, meets every item marked critical, stays within the false-alarm limit, and every `check` exited 0.
 
-## The example task
+## Example tasks
 
 `tasks/build-slugify` is a small write-mode task: fix a `slugify` function with three reported bugs. It has visible tests in `input/`, hidden tests in `overlay/`, a reference fix in `solution/` and a key.
 
@@ -34,12 +34,35 @@ A model passes a job when it meets the job's percentage of key items, meets ever
 
 The tasks I use day to day come from my own private projects, so they are not in this repository.
 
+### A task that uses MCP
+
+`tasks/build-catalog-mcp` asks the agent to fix a pricing module. A local catalogue MCP server provides the current products, prices and bulk discount policy. The task's hidden tests check the result and require successful calls to `list_skus`, `get_price` for every product, and `get_discount_policy`.
+
+The server uses Python's standard library and JSON-RPC over stdio. It implements initialization, tool discovery and tool calls, with input validation and structured results. Its tools declare that they read local data. It logs calls to `MCP_CALL_LOG`, which the runner sets separately for each run.
+
+The runner configures task servers for Codex and Claude Code. It refuses MCP tasks on the other CLI routes. Codex has been tested with a real agent run: all seven catalogue calls succeeded and all nine hidden checks passed. The Claude launch configuration has unit tests; it has not been tested with a real agent here.
+
+To inspect the task without launching an agent:
+
+```
+uv run python -m pytest -q tests/test_mcp_task.py
+```
+
+To run it with Codex installed and logged in:
+
+```
+LADDER_MODELS_FILE=$PWD/models.example.json uv run python ladder.py run --dry-run build-catalog-mcp luna low
+LADDER_MODELS_FILE=$PWD/models.example.json uv run python ladder.py run build-catalog-mcp luna low
+```
+
+The run folder contains `mcp-calls.jsonl` and `check.log`. A successful agent exit and a successful task check are separate results; inspect both. The server and catalogue remain outside the agent's work folder, and the hidden tests are copied in after it finishes. This is a benchmark convention, not a security boundary against an agent deliberately reading or changing those files.
+
 ## Running it
 
 Requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). The tool has no dependencies outside the standard library; pytest and ruff are dev dependencies.
 
 ```
-uv run python -m pytest -q        # 91 tests, no network, no real model launches
+uv run python -m pytest -q        # no network or real model launches
 uv run ruff check .
 ```
 

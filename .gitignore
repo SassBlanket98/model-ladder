@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 runs/*/work/
+runs/
+grades/
+results.csv
+ledger.json

@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -223,13 +223,19 @@ def launch(argv: list[str], cwd: Path, timeout: float) -> Launched:
     return Launched(proc.returncode, proc.stdout, proc.stderr, False)
 
 
-def run_check(cmd: str, cwd: Path, timeout: float) -> tuple[int, str]:
-    """Run a task's `check` shell command in the work dir. Returns (exit code, output)."""
+def run_check(
+    cmd: str, cwd: Path, timeout: float, env: dict[str, str] | None = None
+) -> tuple[int, str]:
+    """Run a task's `check` shell command in the work dir. Returns (exit code, output).
+
+    `env` is added to the inherited environment (LADDER_RUN_DIR for checks that read run files).
+    """
     try:
         proc = subprocess.run(
             cmd,
             shell=True,
             cwd=cwd,
+            env={**os.environ, **env} if env else None,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -273,14 +279,53 @@ def build_prompt(task_prompt: str) -> str:
     return f"{task_prompt.rstrip()}\n\n{FINAL_LINE}\n"
 
 
+def _toml(value: str | list[str] | dict[str, str]) -> str:
+    """A TOML value for a codex `-c key=value` override. JSON strings are valid TOML strings."""
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{k} = {json.dumps(v)}" for k, v in value.items()) + "}"
+    return json.dumps(value)
+
+
+def mcp_args(
+    cli: str, model_id: str, servers: dict[str, list[str]], env: dict[str, str]
+) -> list[str]:
+    """Extra argv that gives the agent the task's MCP servers (stdio). Codex and Claude only."""
+    if cli == "codex":
+        argv: list[str] = []
+        for name, command in servers.items():
+            key = f"mcp_servers.{name}"
+            argv += ["-c", f"{key}.command={_toml(command[0])}"]
+            argv += ["-c", f"{key}.args={_toml(command[1:])}"]
+            if env:
+                argv += ["-c", f"{key}.env={_toml(env)}"]
+        return argv
+    if cli == "claude":
+        config = {
+            "mcpServers": {
+                name: {"command": command[0], "args": command[1:], "env": env}
+                for name, command in servers.items()
+            }
+        }
+        return ["--mcp-config", json.dumps(config), "--strict-mcp-config"]
+    raise Refused(f"refused: {model_id} runs on {cli}, which has no MCP launch route here")
+
+
 def build_command(
-    model: ModelCfg, effort: str, mode: str, prompt: str, work: Path, out: Path
+    model: ModelCfg,
+    effort: str,
+    mode: str,
+    prompt: str,
+    work: Path,
+    out: Path,
+    mcp: dict[str, list[str]] | None = None,
+    mcp_env: dict[str, str] | None = None,
 ) -> list[str]:
     """Argument list for one CLI launch. Never a shell string."""
     if mode not in ("read", "write"):
         raise LadderError(f"unknown mode {mode!r}")
     write = mode == "write"
     cli, m = model.cli, model.cli_model
+    extra = mcp_args(cli, model.id, mcp, mcp_env or {}) if mcp else []
     if cli == "codex":
         argv = [
             "codex",
@@ -294,7 +339,7 @@ def build_command(
         ]
         if effort != DEFAULT_EFFORT:
             argv += ["-c", f"model_reasoning_effort={effort}"]
-        return [*argv, "-o", str(out), prompt]
+        return [*argv, *extra, "-o", str(out), prompt]
     if cli == "claude":
         argv = [
             "env",
@@ -309,11 +354,12 @@ def build_command(
         ]
         if effort != DEFAULT_EFFORT:
             argv += ["--effort", effort]
+        tools = "Read,Grep,Glob,Edit,Write" if write else "Read,Grep,Glob"
+        tools += "".join(f",mcp__{name}" for name in mcp or {})
         if write:
-            argv += ["--permission-mode", "acceptEdits", "--allowedTools=Read,Grep,Glob,Edit,Write"]
-        else:
-            argv += ["--allowedTools=Read,Grep,Glob"]
-        return [*argv, "--", prompt]
+            argv += ["--permission-mode", "acceptEdits"]
+        argv += [f"--allowedTools={tools}"]
+        return [*argv, *extra, "--", prompt]
     if cli == "cursor":
         argv = ["cursor-agent", "-p", "--trust"]
         argv += ["--force"] if write else ["--mode", "ask"]
@@ -322,6 +368,11 @@ def build_command(
         # The spec gives opencode no read-only flag, so read mode is not enforced for it.
         return ["opencode", "run", "--standalone", "--format", "json", "-m", m, prompt]
     raise LadderError(f"unknown cli {cli!r} for {model.id}")
+
+
+def mcp_env(run_dir: Path) -> dict[str, str]:
+    """Environment for a task's MCP servers: where they log the tool calls they receive."""
+    return {"MCP_CALL_LOG": str((run_dir / "mcp-calls.jsonl").resolve())}
 
 
 def last_text_event(stream: str) -> str:
@@ -568,6 +619,7 @@ class Task:
     check: str | None
     links: dict[str, str]
     dir: Path
+    mcp: dict[str, list[str]] = field(default_factory=dict)
 
     def key_items(self) -> list[dict]:
         return json.loads((self.dir / "key.json").read_text(encoding="utf-8"))["items"]
@@ -896,6 +948,12 @@ class Workspace:
                         check=spec.get("check"),
                         links=spec.get("links", {}),
                         dir=d,
+                        mcp={
+                            name: [
+                                part.replace("{task}", str(d.resolve())) for part in srv["command"]
+                            ]
+                            for name, srv in spec.get("mcp", {}).items()
+                        },
                     )
                 )
         return found
@@ -964,7 +1022,11 @@ class Workspace:
         base = f"{task_id}__{model_id}__{effort}"
         work = self.runs_dir / f"{base}__{self._next_number(base)}" / "work"
         prompt = build_prompt((task.dir / "prompt.md").read_text(encoding="utf-8"))
-        return build_command(model, effort, task.mode, prompt, work, work.parent / "out.md"), work
+        run_dir = work.parent
+        argv = build_command(
+            model, effort, task.mode, prompt, work, run_dir / "out.md", task.mcp, mcp_env(run_dir)
+        )
+        return argv, work
 
     def run_task(self, task_id: str, model_id: str, effort: str | None) -> RunRow:
         task, model, effort = self._ready_run(task_id, model_id, effort)
@@ -991,7 +1053,9 @@ class Workspace:
 
         prompt = build_prompt((task.dir / "prompt.md").read_text(encoding="utf-8"))
         out = run_dir / "out.md"
-        argv = build_command(model, effort, task.mode, prompt, work, out)
+        argv = build_command(
+            model, effort, task.mode, prompt, work, out, task.mcp, mcp_env(run_dir)
+        )
         started = time.monotonic()
         launched = launch(argv, work, task.timeout)
         seconds = time.monotonic() - started
@@ -1013,7 +1077,9 @@ class Workspace:
             shutil.copytree(overlay, work, dirs_exist_ok=True)
         check_rc: int | None = None
         if task.check:
-            check_rc, check_out = run_check(task.check, work, task.timeout)
+            check_rc, check_out = run_check(
+                task.check, work, task.timeout, {"LADDER_RUN_DIR": str(run_dir.resolve())}
+            )
             (run_dir / "check.log").write_text(check_out, encoding="utf-8")
 
         # Crashed, timed out or hit a usage limit (rc != 0, no answer) is "error", not "failed".

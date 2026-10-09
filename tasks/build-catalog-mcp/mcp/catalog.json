@@ -1,0 +1,18 @@
+{
+  "products": {
+    "WID-1": {"name": "Widget, small", "unit_price_cents": 1250},
+    "WID-2": {"name": "Widget, large", "unit_price_cents": 2650},
+    "GAD-7": {"name": "Gadget", "unit_price_cents": 10450},
+    "BOLT-3": {"name": "Bolt M3", "unit_price_cents": 35},
+    "NUT-4": {"name": "Nut M4", "unit_price_cents": 18}
+  },
+  "discount_policy": {
+    "applies_to": "each order line separately, by that line's quantity",
+    "tiers": [
+      {"min_quantity": 10, "percent_off": 5},
+      {"min_quantity": 50, "percent_off": 12}
+    ],
+    "rule": "A line gets the single highest tier its quantity reaches. Lines below 10 units get no discount.",
+    "rounding": "The discounted line total is rounded to whole cents, half up. Round per line, then add the lines."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "items": [
+    {"id": "prices", "text": "PRICES matches the catalogue: WID-2 and GAD-7 updated to their current prices and NUT-4 added.", "critical": true},
+    {"id": "tiers", "text": "line_total applies 5% off from 10 units and 12% off from 50 units, per line, using only the highest tier reached.", "critical": true},
+    {"id": "rounding", "text": "The discounted line total is rounded half up to whole cents, per line, before lines are added.", "critical": true},
+    {"id": "source", "text": "The values were taken from the catalog MCP server's tools, not guessed or left as they were.", "critical": true},
+    {"id": "errors", "text": "KeyError for an unknown SKU and ValueError for a bad quantity still hold, and the signatures are unchanged.", "critical": false}
+  ],
+  "nonIssues": [
+    "The existing tests in test_pricing.py are wrong or need changing.",
+    "Prices should be floats or Decimal instead of integer cents."
+  ]
+}
